@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     max_webhook_secret: str = ""
     max_api_base_url: str = "https://platform-api2.max.ru"
     max_ca_bundle: str | None = None
+    rodcom_api_base_url: str | None = None
+    rodcom_gateway_token: str | None = None
+    max_bot_username: str = "id0278198770_bot"
 
     model_config = SettingsConfigDict(
         env_file=".env",

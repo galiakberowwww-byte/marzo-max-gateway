@@ -55,6 +55,19 @@ class MaxClient:
             raise MaxApiError(f"MAX API returned HTTP {response.status_code}")
         return response.json()
 
+    async def send_keyboard(
+        self, text: str, buttons: list[dict[str, Any]], *, user_id: int | None = None, chat_id: int | None = None
+    ) -> dict[str, Any]:
+        if (user_id is None) == (chat_id is None):
+            raise ValueError("Specify exactly one of user_id or chat_id")
+        params = {"user_id": user_id} if user_id is not None else {"chat_id": chat_id}
+        payload = {"text": text, "notify": True, "attachments": [{"type": "inline_keyboard", "payload": {"buttons": buttons}}]}
+        async with httpx.AsyncClient(timeout=15, verify=self._verify) as client:
+            response = await client.post(f"{self._base_url}/messages", headers=self._headers, params=params, json=payload)
+        if response.is_error:
+            raise MaxApiError(f"MAX API returned HTTP {response.status_code}")
+        return response.json()
+
     async def create_subscription(
         self,
         webhook_url: str,
