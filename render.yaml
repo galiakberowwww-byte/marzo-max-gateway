@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: marzo-max-gateway
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: MAX_BOT_TOKEN
+        sync: false
+      - key: MAX_WEBHOOK_SECRET
+        sync: false
+      - key: MAX_CA_BUNDLE
+        value: /app/certs/max-russian-trusted-ca.pem

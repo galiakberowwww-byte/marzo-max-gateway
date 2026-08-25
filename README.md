@@ -37,3 +37,24 @@ python -m scripts.register_webhook https://example.ru/webhooks/max
 ```
 
 Скрипт подписывается на `message_created` и `bot_started`. Секреты в консоль не выводятся.
+
+## Размещение на Render
+
+В репозитории есть `render.yaml` и `Dockerfile`, поэтому сервис можно создать как
+Render Blueprint. При создании Render попросит два значения, которые нельзя
+публиковать в GitHub:
+
+- `MAX_BOT_TOKEN` — существующий токен бота MAX;
+- `MAX_WEBHOOK_SECRET` — существующий секрет webhook.
+
+После успешного развёртывания проверьте адрес:
+
+```text
+https://<имя-сервиса>.onrender.com/health
+```
+
+Затем переключите подписку MAX на постоянный endpoint:
+
+```powershell
+python -m scripts.register_webhook https://<имя-сервиса>.onrender.com/webhooks/max
+```
