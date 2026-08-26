@@ -7,6 +7,7 @@ os.environ.setdefault(
     "RODCOM_WEBHOOK_URL",
     "https://rodcom.example/api/v1/integrations/max/webhook",
 )
+os.environ.setdefault("RODCOM_BRIDGE_SECRET", "bridge-secret-1234567890")
 
 from fastapi.testclient import TestClient
 
@@ -25,6 +26,7 @@ def test_health_identifies_rodcom_gateway() -> None:
         "status": "ok",
         "service": "rodcom-max-gateway",
         "rodcomWebhookConfigured": True,
+        "rodcomBridgeConfigured": True,
     }
 
 
@@ -83,6 +85,53 @@ def test_forwards_start_and_core_commands_unchanged(monkeypatch) -> None:
         assert response.json() == {"ok": True}
 
     assert forwarded == updates
+
+
+def test_bridge_requires_rodcom_secret() -> None:
+    response = client.post(
+        "/internal/rodcom/send",
+        headers={"X-Rodcom-Bridge-Secret": "wrong"},
+        json={"mode": "message", "externalUserId": "42", "view": {"text": "Родком", "buttons": []}},
+    )
+    assert response.status_code == 401
+
+
+def test_bridge_sends_message_and_callback_views(monkeypatch) -> None:
+    calls = []
+
+    class FakeMaxClient:
+        async def send_view(self, user_id, view):
+            calls.append(("message", user_id, view))
+            return {"ok": True}
+
+        async def answer_callback(self, callback_id, view):
+            calls.append(("callback", callback_id, view))
+            return {"ok": True}
+
+    monkeypatch.setattr(main, "_max_client", lambda settings: FakeMaxClient())
+
+    message_view = {
+        "text": "Родком",
+        "buttons": [[{"text": "Мои сборы", "payload": "rodcom:collections"}]],
+    }
+    response = client.post(
+        "/internal/rodcom/send",
+        headers={"X-Rodcom-Bridge-Secret": "bridge-secret-1234567890"},
+        json={"mode": "message", "externalUserId": "42", "view": message_view},
+    )
+    assert response.status_code == 200
+
+    callback_view = {"text": "Обновлено", "buttons": []}
+    response = client.post(
+        "/internal/rodcom/send",
+        headers={"X-Rodcom-Bridge-Secret": "bridge-secret-1234567890"},
+        json={"mode": "callback", "callbackId": "cb-1", "view": callback_view},
+    )
+    assert response.status_code == 200
+    assert calls == [
+        ("message", 42, message_view),
+        ("callback", "cb-1", callback_view),
+    ]
 
 
 def test_gateway_has_no_product_router_or_legacy_copy() -> None:
