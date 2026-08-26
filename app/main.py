@@ -22,6 +22,15 @@ def _max_client(settings: Settings) -> MaxClient:
     )
 
 
+def _public_bot_identity(profile: dict[str, Any]) -> dict[str, str | int]:
+    safe: dict[str, str | int] = {}
+    for key in ("user_id", "username", "name", "first_name", "last_name"):
+        value = profile.get(key)
+        if isinstance(value, (str, int)) and not isinstance(value, bool):
+            safe[key] = value
+    return safe
+
+
 async def forward_to_rodcom(update: dict[str, Any]) -> None:
     settings = get_settings()
     if not settings.rodcom_webhook_url:
@@ -78,9 +87,20 @@ async def ensure_max_subscription() -> None:
     logger.info("MAX webhook subscription configured for Rodcom")
 
 
+async def log_max_identity() -> None:
+    settings = get_settings()
+    try:
+        profile = await _max_client(settings).get_me()
+    except Exception as exc:
+        logger.warning("MAX bot identity startup check failed: %s", exc)
+        return
+    logger.info("MAX bot identity: %s", _public_bot_identity(profile))
+
+
 @app.on_event("startup")
 async def startup() -> None:
     await ensure_max_subscription()
+    await log_max_identity()
 
 
 @app.get("/health")
@@ -103,13 +123,7 @@ async def max_identity() -> dict[str, Any]:
     except Exception as exc:
         logger.warning("MAX bot identity check failed: %s", exc)
         raise HTTPException(status_code=502, detail="MAX bot identity is unavailable") from exc
-
-    safe: dict[str, str | int] = {}
-    for key in ("user_id", "username", "name", "first_name", "last_name"):
-        value = profile.get(key)
-        if isinstance(value, (str, int)) and not isinstance(value, bool):
-            safe[key] = value
-    return {"status": "ok", "bot": safe}
+    return {"status": "ok", "bot": _public_bot_identity(profile)}
 
 
 @app.post("/webhooks/max")
