@@ -1,60 +1,60 @@
-# MARZO MAX Gateway
+# RODCOM MAX Gateway
 
-Минимальный backend для приёма событий MAX через Webhook и отправки ответов через MAX Bot API.
+Транспортный ingress для существующего MAX-бота проекта «Родком».
+
+Репозиторий исторически называется `marzo-max-gateway`, но пользовательских сценариев MARZO здесь больше нет. Сервис принимает события MAX на стабильном endpoint `/webhooks/max` и пересылает их без продуктовой маршрутизации в канонический backend Родкома:
+
+`POST /api/v1/integrations/max/webhook`
+
+Вся бизнес-логика, роли, multi-community, сборы, согласования, состав класса и финансовые сценарии остаются в репозитории `rodcom`.
+
+## Переменные окружения
+
+- `MAX_BOT_TOKEN` — токен существующего MAX-бота; нужен для скрипта регистрации подписки;
+- `MAX_WEBHOOK_SECRET` — секрет, которым MAX подписывает входящий webhook;
+- `RODCOM_WEBHOOK_URL` — публичный URL канонического Rodcom webhook, например `https://<rodcom-host>/api/v1/integrations/max/webhook`;
+- `RODCOM_WEBHOOK_SECRET` — секрет Rodcom webhook. Можно оставить пустым, если используется тот же `MAX_WEBHOOK_SECRET`;
+- `MAX_CA_BUNDLE` — CA bundle для исходящих запросов скрипта регистрации к MAX API;
+- `RODCOM_REQUEST_TIMEOUT_SECONDS` — timeout проксирования, по умолчанию 10 секунд.
+
+Если `RODCOM_WEBHOOK_URL` не задан, сервис запускается, но `/webhooks/max` возвращает `503` — это fail-closed режим, чтобы не возвращать пользователю старый или неподтверждённый продуктовый сценарий.
 
 ## Локальный запуск
-
-Требуется Python 3.11+ и пользовательская переменная Windows `MAX_BOT_TOKEN`.
 
 ```powershell
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements-dev.txt
-$env:MAX_WEBHOOK_SECRET = 'локальный-секрет-для-теста'
+$env:MAX_BOT_TOKEN = 'test-token'
+$env:MAX_WEBHOOK_SECRET = 'local-secret'
+$env:RODCOM_WEBHOOK_URL = 'https://rodcom.example/api/v1/integrations/max/webhook'
 uvicorn app.main:app --reload
 ```
 
-Проверка в другом окне PowerShell:
+Проверка:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/health
 ```
 
-## Production Webhook
+## MAX subscription
 
-MAX принимает только публичный HTTPS endpoint на порту 443 с доверенным TLS-сертификатом. После размещения приложения задайте на сервере два секрета:
+Для Rodcom нужны события:
 
-- `MAX_BOT_TOKEN` — токен бота;
-- `MAX_WEBHOOK_SECRET` — отдельная случайная строка для проверки заголовка `X-Max-Bot-Api-Secret`.
-- `MAX_CA_BUNDLE` — путь к PEM-файлу с доверенной цепочкой НУЦ Минцифры для исходящих запросов к `platform-api2.max.ru`.
+- `bot_started`;
+- `message_created`;
+- `message_callback`.
 
-Сертификаты НУЦ скачивайте только с официальной страницы Госуслуг `https://www.gosuslugi.ru/crt`. Не отключайте TLS-проверку через `verify=False`.
-
-Зарегистрируйте endpoint:
+Регистрация существующего публичного endpoint:
 
 ```powershell
-python -m scripts.register_webhook https://example.ru/webhooks/max
+python -m scripts.register_webhook https://<legacy-service>.onrender.com/webhooks/max
 ```
 
-Скрипт подписывается на `message_created` и `bot_started`. Секреты в консоль не выводятся.
+Стабильный внешний URL старого Render-сервиса можно сохранить: переименование сервиса не требуется для переключения логики на Родком.
 
-## Размещение на Render
+## Render
 
-В репозитории есть `render.yaml` и `Dockerfile`, поэтому сервис можно создать как
-Render Blueprint. При создании Render попросит два значения, которые нельзя
-публиковать в GitHub:
+`render.yaml` намеренно сохраняет прежнее имя Render-сервиса, чтобы не создавать второй MAX ingress и не менять публичный webhook URL без необходимости.
 
-- `MAX_BOT_TOKEN` — существующий токен бота MAX;
-- `MAX_WEBHOOK_SECRET` — существующий секрет webhook.
-
-После успешного развёртывания проверьте адрес:
-
-```text
-https://<имя-сервиса>.onrender.com/health
-```
-
-Затем переключите подписку MAX на постоянный endpoint:
-
-```powershell
-python -m scripts.register_webhook https://<имя-сервиса>.onrender.com/webhooks/max
-```
+После merge обязательно задать в Render `RODCOM_WEBHOOK_URL`. После этого проверить `/health`: поле `rodcomWebhookConfigured` должно быть `true`.
