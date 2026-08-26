@@ -23,9 +23,38 @@ class MaxClient:
             ca_path = Path(ca_bundle).expanduser().resolve()
             self._verify = ssl.create_default_context(cafile=str(ca_path))
 
+    @staticmethod
+    def _safe_media_attachments(view: dict[str, Any]) -> list[dict[str, Any]]:
+        raw_items = view.get("mediaAttachments") or []
+        if not isinstance(raw_items, list):
+            return []
+
+        result: list[dict[str, Any]] = []
+        for raw in raw_items[:4]:
+            if not isinstance(raw, dict):
+                continue
+            attachment_type = raw.get("type")
+            payload = raw.get("payload")
+            if not isinstance(payload, dict):
+                continue
+
+            if attachment_type == "image":
+                token = payload.get("token")
+                url = payload.get("url")
+                if isinstance(token, str) and token:
+                    result.append({"type": "image", "payload": {"token": token}})
+                elif isinstance(url, str) and url:
+                    result.append({"type": "image", "payload": {"url": url}})
+            elif attachment_type == "file":
+                token = payload.get("token")
+                if isinstance(token, str) and token:
+                    result.append({"type": "file", "payload": {"token": token}})
+
+        return result
+
     def _view_body(self, view: dict[str, Any]) -> dict[str, Any]:
         buttons = view.get("buttons") or []
-        attachments: list[dict[str, Any]] = []
+        attachments = self._safe_media_attachments(view)
         if buttons:
             attachments.append(
                 {
