@@ -94,6 +94,24 @@ async def health() -> dict[str, str | bool]:
     }
 
 
+@app.get("/health/max-identity")
+async def max_identity() -> dict[str, Any]:
+    """Return only public MAX bot identity fields for operational wiring checks."""
+    settings = get_settings()
+    try:
+        profile = await _max_client(settings).get_me()
+    except Exception as exc:
+        logger.warning("MAX bot identity check failed: %s", exc)
+        raise HTTPException(status_code=502, detail="MAX bot identity is unavailable") from exc
+
+    safe: dict[str, str | int] = {}
+    for key in ("user_id", "username", "name", "first_name", "last_name"):
+        value = profile.get(key)
+        if isinstance(value, (str, int)) and not isinstance(value, bool):
+            safe[key] = value
+    return {"status": "ok", "bot": safe}
+
+
 @app.post("/webhooks/max")
 async def max_webhook(
     request: Request,
