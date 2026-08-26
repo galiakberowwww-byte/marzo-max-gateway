@@ -1,9 +1,14 @@
+import base64
 import hmac
+import io
 import logging
+import re
 from typing import Any
 
 import httpx
+import qrcode
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import Response
 
 from app.max_client import MaxClient
 from app.settings import Settings, get_settings
@@ -11,7 +16,11 @@ from app.settings import Settings, get_settings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("rodcom.max.gateway")
 
-app = FastAPI(title="RODCOM MAX Gateway", version="0.3.0")
+app = FastAPI(title="RODCOM MAX Gateway", version="0.4.0")
+
+_INVITE_TARGET = re.compile(
+    r"^https://max\.ru/[A-Za-z0-9_]+\?start=ri_[A-Za-z0-9_-]{16,120}$"
+)
 
 
 def _max_client(settings: Settings) -> MaxClient:
@@ -29,6 +38,20 @@ def _public_bot_identity(profile: dict[str, Any]) -> dict[str, str | int]:
         if isinstance(value, (str, int)) and not isinstance(value, bool):
             safe[key] = value
     return safe
+
+
+def _decode_invite_qr_target(data: str) -> str:
+    if not data or len(data) > 4096:
+        raise HTTPException(status_code=422, detail="Invalid invite QR payload")
+    try:
+        padded = data + "=" * (-len(data) % 4)
+        raw = base64.b64decode(padded, altchars=b"-_", validate=True)
+        target = raw.decode("utf-8")
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid invite QR payload") from exc
+    if not _INVITE_TARGET.fullmatch(target):
+        raise HTTPException(status_code=422, detail="Invalid invite QR target")
+    return target
 
 
 async def forward_to_rodcom(update: dict[str, Any]) -> None:
@@ -124,6 +147,31 @@ async def max_identity() -> dict[str, Any]:
         logger.warning("MAX bot identity check failed: %s", exc)
         raise HTTPException(status_code=502, detail="MAX bot identity is unavailable") from exc
     return {"status": "ok", "bot": _public_bot_identity(profile)}
+
+
+@app.get("/public/qr/invite.png")
+async def invite_qr(data: str) -> Response:
+    """Render an invite QR locally; the opaque invite is never sent to a third-party QR service."""
+    target = _decode_invite_qr_target(data)
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(target)
+    qr.make(fit=True)
+    image = qr.make_image(fill_color="black", back_color="white")
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    return Response(
+        content=output.getvalue(),
+        media_type="image/png",
+        headers={
+            "Cache-Control": "private, no-store, max-age=0",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @app.post("/webhooks/max")
