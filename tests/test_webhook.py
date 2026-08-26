@@ -30,6 +30,31 @@ def test_health_identifies_rodcom_gateway() -> None:
     }
 
 
+def test_max_identity_health_returns_only_public_bot_fields(monkeypatch) -> None:
+    class FakeMaxClient:
+        async def get_me(self):
+            return {
+                "user_id": 12345,
+                "username": "rodcom_test_bot",
+                "name": "Родком",
+                "token": "must-not-leak",
+                "phone": "+79990000000",
+                "nested": {"secret": "hidden"},
+            }
+
+    monkeypatch.setattr(main, "_max_client", lambda settings: FakeMaxClient())
+    response = client.get("/health/max-identity")
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "bot": {
+            "user_id": 12345,
+            "username": "rodcom_test_bot",
+            "name": "Родком",
+        },
+    }
+
+
 def test_rejects_invalid_max_secret() -> None:
     response = client.post(
         "/webhooks/max",
