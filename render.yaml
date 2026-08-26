@@ -1,5 +1,6 @@
 services:
   - type: web
+    # Keep the legacy Render service name so the existing MAX webhook URL stays stable.
     name: marzo-max-gateway
     runtime: docker
     plan: free
@@ -9,6 +10,10 @@ services:
       - key: MAX_BOT_TOKEN
         sync: false
       - key: MAX_WEBHOOK_SECRET
+        sync: false
+      - key: RODCOM_WEBHOOK_URL
+        sync: false
+      - key: RODCOM_WEBHOOK_SECRET
         sync: false
       - key: MAX_CA_BUNDLE
         value: /app/certs/max-russian-trusted-ca.pem
