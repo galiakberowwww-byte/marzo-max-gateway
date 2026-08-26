@@ -13,9 +13,16 @@ class Settings(BaseSettings):
     # Rodcom runtime. Keep this empty during deployment only; /webhooks/max
     # fails closed with 503 until the target is configured.
     rodcom_webhook_url: str = ""
-    # If omitted, use the same secret that MAX sends to this ingress.
     rodcom_webhook_secret: str = ""
     rodcom_request_timeout_seconds: float = 10.0
+
+    # Rodcom posts prepared BotView responses back to this gateway because the
+    # existing MAX token remains here. This secret authenticates that callback.
+    rodcom_bridge_secret: str = ""
+
+    # Public subscription URL for the existing MAX bot. When configured, the
+    # gateway ensures message callbacks are included in the subscription.
+    public_webhook_url: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",
