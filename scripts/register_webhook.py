@@ -6,7 +6,7 @@ from app.settings import get_settings
 
 
 async def main() -> None:
-    parser = argparse.ArgumentParser(description="Register the MARZO MAX webhook")
+    parser = argparse.ArgumentParser(description="Register the RODCOM MAX webhook")
     parser.add_argument("url", help="Public HTTPS URL ending in /webhooks/max")
     args = parser.parse_args()
 
@@ -25,7 +25,7 @@ async def main() -> None:
     result = await client.create_subscription(
         args.url,
         settings.max_webhook_secret,
-        ["message_created", "bot_started"],
+        ["message_created", "message_callback", "bot_started"],
     )
     print("Webhook registered" if result.get("success") else "Registration failed")
     if result.get("message"):
