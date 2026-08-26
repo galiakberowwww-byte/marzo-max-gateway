@@ -23,6 +23,30 @@ class MaxClient:
             ca_path = Path(ca_bundle).expanduser().resolve()
             self._verify = ssl.create_default_context(cafile=str(ca_path))
 
+    def _view_body(self, view: dict[str, Any]) -> dict[str, Any]:
+        buttons = view.get("buttons") or []
+        attachments: list[dict[str, Any]] = []
+        if buttons:
+            attachments.append(
+                {
+                    "type": "inline_keyboard",
+                    "payload": {
+                        "buttons": [
+                            [
+                                {
+                                    "type": "callback",
+                                    "text": button["text"],
+                                    "payload": button["payload"],
+                                }
+                                for button in row
+                            ]
+                            for row in buttons
+                        ]
+                    },
+                }
+            )
+        return {"text": str(view.get("text") or ""), "attachments": attachments}
+
     async def get_me(self) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=20, verify=self._verify) as client:
             response = await client.get(
@@ -50,6 +74,30 @@ class MaxClient:
                 headers=self._headers,
                 params=params,
                 json={"text": text, "notify": True},
+            )
+        if response.is_error:
+            raise MaxApiError(f"MAX API returned HTTP {response.status_code}")
+        return response.json()
+
+    async def send_view(self, user_id: int, view: dict[str, Any]) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=15, verify=self._verify) as client:
+            response = await client.post(
+                f"{self._base_url}/messages",
+                headers=self._headers,
+                params={"user_id": user_id},
+                json=self._view_body(view),
+            )
+        if response.is_error:
+            raise MaxApiError(f"MAX API returned HTTP {response.status_code}")
+        return response.json()
+
+    async def answer_callback(self, callback_id: str, view: dict[str, Any]) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=15, verify=self._verify) as client:
+            response = await client.post(
+                f"{self._base_url}/answers",
+                headers=self._headers,
+                params={"callback_id": callback_id},
+                json={"message": self._view_body(view)},
             )
         if response.is_error:
             raise MaxApiError(f"MAX API returned HTTP {response.status_code}")

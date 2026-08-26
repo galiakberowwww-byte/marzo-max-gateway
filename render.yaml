@@ -15,5 +15,9 @@ services:
         sync: false
       - key: RODCOM_WEBHOOK_SECRET
         sync: false
+      - key: RODCOM_BRIDGE_SECRET
+        sync: false
+      - key: PUBLIC_WEBHOOK_URL
+        value: https://marzo-max-gateway.onrender.com/webhooks/max
       - key: MAX_CA_BUNDLE
         value: /app/certs/max-russian-trusted-ca.pem
