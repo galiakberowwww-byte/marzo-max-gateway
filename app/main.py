@@ -2,95 +2,54 @@ import hmac
 import logging
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
+import httpx
+from fastapi import FastAPI, Header, HTTPException, Request
 
-from app.max_client import MaxClient
 from app.settings import get_settings
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("marzo.max.gateway")
+logger = logging.getLogger("rodcom.max.gateway")
 
-app = FastAPI(title="MARZO MAX Gateway", version="0.1.0")
-
-
-def _as_int(value: Any) -> int | None:
-    try:
-        return int(value) if value is not None else None
-    except (TypeError, ValueError):
-        return None
+app = FastAPI(title="RODCOM MAX Gateway", version="0.2.0")
 
 
-def _message_target(update: dict[str, Any]) -> tuple[str, int] | None:
-    message = update.get("message") or {}
-    sender = message.get("sender") or update.get("user") or {}
-    recipient = message.get("recipient") or {}
-
-    if sender.get("is_bot") is True:
-        return None
-
-    user_id = _as_int(sender.get("user_id") or update.get("user_id"))
-    chat_id = _as_int(
-        update.get("chat_id")
-        or recipient.get("chat_id")
-        or message.get("chat_id")
-    )
-
-    recipient_type = recipient.get("chat_type") or recipient.get("type")
-    if recipient_type == "dialog" and user_id is not None:
-        return ("user_id", user_id)
-    if chat_id is not None:
-        return ("chat_id", chat_id)
-    if user_id is not None:
-        return ("user_id", user_id)
-    return None
-
-
-async def process_update(update: dict[str, Any]) -> None:
+async def forward_to_rodcom(update: dict[str, Any]) -> None:
     settings = get_settings()
-    client = MaxClient(
-        settings.max_bot_token,
-        settings.max_api_base_url,
-        settings.max_ca_bundle,
-    )
-    update_type = update.get("update_type", "unknown")
-    logger.info("MAX update received: type=%s", update_type)
+    if not settings.rodcom_webhook_url:
+        raise HTTPException(status_code=503, detail="RODCOM webhook target is not configured")
 
-    target = _message_target(update)
-    if target is None:
-        return
+    secret = settings.rodcom_webhook_secret or settings.max_webhook_secret
+    headers = {"X-Max-Bot-Api-Secret": secret} if secret else {}
 
-    target_name, target_id = target
-    if update_type == "bot_started":
-        reply = (
-            "Здравствуйте! Я бот MARZO. Помогу с плиткой, дизайном и ремонтом. "
-            "Напишите, что вам требуется."
-        )
-    elif update_type == "message_created":
-        message = update.get("message") or {}
-        body = message.get("body") or {}
-        text = (body.get("text") or "").strip()
-        if not text:
-            reply = "Файл получил. Скоро добавим его обработку в сценарий MARZO."
-        else:
-            reply = (
-                "Спасибо, сообщение получил. Это первый тест MARZO Gateway. "
-                "Следующим шагом подключим сценарий квалификации лида."
+    try:
+        async with httpx.AsyncClient(timeout=settings.rodcom_request_timeout_seconds) as client:
+            response = await client.post(
+                settings.rodcom_webhook_url,
+                json=update,
+                headers=headers,
             )
-    else:
-        return
+    except httpx.RequestError as exc:
+        logger.exception("RODCOM webhook request failed")
+        raise HTTPException(status_code=502, detail="RODCOM webhook is unavailable") from exc
 
-    await client.send_text(reply, **{target_name: target_id})
+    if response.status_code < 200 or response.status_code >= 300:
+        logger.error("RODCOM webhook rejected update: status=%s", response.status_code)
+        raise HTTPException(status_code=502, detail="RODCOM webhook rejected the update")
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok", "service": "marzo-max-gateway"}
+async def health() -> dict[str, str | bool]:
+    settings = get_settings()
+    return {
+        "status": "ok",
+        "service": "rodcom-max-gateway",
+        "rodcomWebhookConfigured": bool(settings.rodcom_webhook_url),
+    }
 
 
 @app.post("/webhooks/max")
 async def max_webhook(
     request: Request,
-    background_tasks: BackgroundTasks,
     x_max_bot_api_secret: str | None = Header(default=None),
 ) -> dict[str, bool]:
     settings = get_settings()
@@ -101,5 +60,6 @@ async def max_webhook(
         raise HTTPException(status_code=401, detail="Invalid webhook secret")
 
     update = await request.json()
-    background_tasks.add_task(process_update, update)
+    logger.info("MAX update received for RODCOM: type=%s", update.get("update_type", "unknown"))
+    await forward_to_rodcom(update)
     return {"ok": True}
