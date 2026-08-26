@@ -1,3 +1,4 @@
+import base64
 import os
 from pathlib import Path
 
@@ -17,6 +18,10 @@ from app.main import app
 
 client = TestClient(app)
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _encode_qr_target(value: str) -> str:
+    return base64.urlsafe_b64encode(value.encode("utf-8")).decode("ascii").rstrip("=")
 
 
 def test_health_identifies_rodcom_gateway() -> None:
@@ -53,6 +58,21 @@ def test_max_identity_health_returns_only_public_bot_fields(monkeypatch) -> None
             "name": "Родком",
         },
     }
+
+
+def test_invite_qr_is_generated_locally_as_png() -> None:
+    target = "https://max.ru/id0278198770_bot?start=ri_abcdefghijklmnopqrstuvwxyz012345"
+    response = client.get("/public/qr/invite.png", params={"data": _encode_qr_target(target)})
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert "no-store" in response.headers["cache-control"]
+    assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_invite_qr_rejects_non_max_or_malformed_targets() -> None:
+    wrong_host = _encode_qr_target("https://example.com/?start=ri_abcdefghijklmnopqrstuvwxyz012345")
+    assert client.get("/public/qr/invite.png", params={"data": wrong_host}).status_code == 422
+    assert client.get("/public/qr/invite.png", params={"data": "%%%"}).status_code == 422
 
 
 def test_rejects_invalid_max_secret() -> None:
