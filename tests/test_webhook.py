@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 os.environ.setdefault("MAX_BOT_TOKEN", "test-token")
 os.environ.setdefault("MAX_WEBHOOK_SECRET", "test-secret")
@@ -14,6 +15,7 @@ from app.main import app
 
 
 client = TestClient(app)
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_health_identifies_rodcom_gateway() -> None:
@@ -84,8 +86,15 @@ def test_forwards_start_and_core_commands_unchanged(monkeypatch) -> None:
 
 
 def test_gateway_has_no_product_router_or_legacy_copy() -> None:
-    source = open(main.__file__, encoding="utf-8").read().lower()
+    source = Path(main.__file__).read_text(encoding="utf-8").lower()
     assert "marzo" not in source
     assert "квалификац" not in source
     assert "плитк" not in source
     assert "ремонт" not in source
+
+
+def test_subscription_includes_callback_updates() -> None:
+    script = (ROOT / "scripts" / "register_webhook.py").read_text(encoding="utf-8")
+    assert '"message_created"' in script
+    assert '"message_callback"' in script
+    assert '"bot_started"' in script
