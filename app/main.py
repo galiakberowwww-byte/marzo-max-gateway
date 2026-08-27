@@ -11,6 +11,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response
 
 from app.max_client import MaxClient
+from app.max_webapp import MaxWebAppValidationError, validate_max_webapp_init_data
 from app.settings import Settings, get_settings
 
 logging.basicConfig(level=logging.INFO)
@@ -52,6 +53,13 @@ def _decode_invite_qr_target(data: str) -> str:
     if not _INVITE_TARGET.fullmatch(target):
         raise HTTPException(status_code=422, detail="Invalid invite QR target")
     return target
+
+
+def _require_rodcom_bridge(settings: Settings, received: str | None) -> None:
+    if not settings.rodcom_bridge_secret:
+        raise HTTPException(status_code=503, detail="RODCOM bridge is not configured")
+    if not hmac.compare_digest(received or "", settings.rodcom_bridge_secret):
+        raise HTTPException(status_code=401, detail="Invalid RODCOM bridge secret")
 
 
 async def forward_to_rodcom(update: dict[str, Any]) -> None:
@@ -192,19 +200,40 @@ async def max_webhook(
     return {"ok": True}
 
 
+@app.post("/internal/rodcom/verify-miniapp")
+async def verify_rodcom_miniapp(
+    request: Request,
+    x_rodcom_bridge_secret: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Verify MAX WebApp initData without exposing the bot token to Rodcom."""
+    settings = get_settings()
+    _require_rodcom_bridge(settings, x_rodcom_bridge_secret)
+    payload = await request.json()
+    init_data = payload.get("initData") if isinstance(payload, dict) else None
+    if not isinstance(init_data, str) or not init_data or len(init_data) > 16384:
+        raise HTTPException(status_code=422, detail="Invalid MAX initData payload")
+    try:
+        verified = validate_max_webapp_init_data(init_data, settings.max_bot_token)
+    except MaxWebAppValidationError as exc:
+        detail = "MAX Mini App session expired" if str(exc) == "expired_init_data" else "Invalid MAX initData"
+        raise HTTPException(status_code=401, detail=detail) from exc
+    return {
+        "ok": True,
+        "externalUserId": verified.external_user_id,
+        "authDate": verified.auth_date,
+        "startParam": verified.start_param,
+        "firstName": verified.first_name,
+        "lastName": verified.last_name,
+    }
+
+
 @app.post("/internal/rodcom/send")
 async def rodcom_send(
     request: Request,
     x_rodcom_bridge_secret: str | None = Header(default=None),
 ) -> dict[str, bool]:
     settings = get_settings()
-    if not settings.rodcom_bridge_secret:
-        raise HTTPException(status_code=503, detail="RODCOM bridge is not configured")
-    if not hmac.compare_digest(
-        x_rodcom_bridge_secret or "",
-        settings.rodcom_bridge_secret,
-    ):
-        raise HTTPException(status_code=401, detail="Invalid RODCOM bridge secret")
+    _require_rodcom_bridge(settings, x_rodcom_bridge_secret)
 
     payload = await request.json()
     mode = payload.get("mode")
