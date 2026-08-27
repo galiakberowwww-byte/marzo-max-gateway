@@ -52,6 +52,22 @@ class MaxClient:
 
         return result
 
+    @staticmethod
+    def _keyboard_button(button: dict[str, Any]) -> dict[str, Any]:
+        text = str(button.get("text") or "")[:128]
+        payload = button.get("payload")
+        if isinstance(payload, str) and payload.startswith("__open_app__:"):
+            start_payload = payload.removeprefix("__open_app__:")[:512]
+            result: dict[str, Any] = {"type": "open_app", "text": text}
+            if start_payload:
+                result["payload"] = start_payload
+            return result
+        return {
+            "type": "callback",
+            "text": text,
+            "payload": str(payload or ""),
+        }
+
     def _view_body(self, view: dict[str, Any]) -> dict[str, Any]:
         buttons = view.get("buttons") or []
         attachments = self._safe_media_attachments(view)
@@ -61,15 +77,9 @@ class MaxClient:
                     "type": "inline_keyboard",
                     "payload": {
                         "buttons": [
-                            [
-                                {
-                                    "type": "callback",
-                                    "text": button["text"],
-                                    "payload": button["payload"],
-                                }
-                                for button in row
-                            ]
+                            [self._keyboard_button(button) for button in row]
                             for row in buttons
+                            if isinstance(row, list)
                         ]
                     },
                 }

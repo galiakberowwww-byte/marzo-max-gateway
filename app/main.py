@@ -20,7 +20,7 @@ logger = logging.getLogger("rodcom.max.gateway")
 app = FastAPI(title="RODCOM MAX Gateway", version="0.4.0")
 
 _INVITE_TARGET = re.compile(
-    r"^https://max\.ru/[A-Za-z0-9_]+\?start=ri_[A-Za-z0-9_-]{16,120}$"
+    r"^https://max\.ru/[A-Za-z0-9_]+\?(?:start=ri_[A-Za-z0-9_-]{16,120}|startapp=(?:invite|ref)_[A-Za-z0-9_-]{16,120})$"
 )
 
 
@@ -159,7 +159,7 @@ async def max_identity() -> dict[str, Any]:
 
 @app.get("/public/qr/invite.png")
 async def invite_qr(data: str) -> Response:
-    """Render an invite QR locally; the opaque invite is never sent to a third-party QR service."""
+    """Render an invite/referral QR locally; opaque tokens never leave Rodcom infrastructure."""
     target = _decode_invite_qr_target(data)
     qr = qrcode.QRCode(
         version=None,
