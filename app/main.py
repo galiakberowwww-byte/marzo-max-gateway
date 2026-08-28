@@ -90,12 +90,14 @@ async def process_update(update: dict[str, Any]) -> None:
         await client.send_text(text, **{target_name: target_id})
 
     async def menu(text: str) -> None:
-        await client.send_keyboard(text, [
-            {"type": "message", "text": "Плитка / керамогранит"},
-            {"type": "message", "text": "Дизайн"},
-            {"type": "message", "text": "Ремонт / отделка"},
-            {"type": "message", "text": "Комплектация / под ключ"},
-        ], **{target_name: target_id})
+        await send(
+            f"{text}\n\n"
+            "Напишите одно направление:\n"
+            "• Плитка / керамогранит\n"
+            "• Дизайн\n"
+            "• Ремонт / отделка\n"
+            "• Комплектация / под ключ"
+        )
 
     if update_type == "bot_started":
         payload = update.get("payload")
