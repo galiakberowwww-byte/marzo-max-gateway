@@ -8,7 +8,7 @@ os.environ.setdefault("RODCOM_BRIDGE_SECRET", "bridge-secret-1234567890")
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.max_client import MaxClient
+from app.max_client import MaxApiError, MaxClient
 
 
 client = TestClient(app)
@@ -19,7 +19,11 @@ def _qr(value: str) -> str:
 
 
 def test_gateway_serializes_special_button_as_native_open_app() -> None:
-    max_client = MaxClient("token", "https://platform-api2.max.ru")
+    max_client = MaxClient(
+        "token",
+        "https://platform-api2.max.ru",
+        web_app="id0278198770_bot",
+    )
     body = max_client._view_body({
         "text": "Готово",
         "buttons": [[
@@ -31,9 +35,24 @@ def test_gateway_serializes_special_button_as_native_open_app() -> None:
     assert buttons[0] == {
         "type": "open_app",
         "text": "Открыть в приложении",
+        "web_app": "id0278198770_bot",
         "payload": "collection_11111111-1111-1111-1111-111111111111",
     }
     assert buttons[1]["type"] == "callback"
+
+
+def test_gateway_fails_closed_when_open_app_username_is_missing(monkeypatch) -> None:
+    monkeypatch.delenv("MAX_BOT_USERNAME", raising=False)
+    max_client = MaxClient("token", "https://platform-api2.max.ru")
+    try:
+        max_client._view_body({
+            "text": "Готово",
+            "buttons": [[{"text": "Открыть", "payload": "__open_app__:home"}]],
+        })
+    except MaxApiError as exc:
+        assert "username" in str(exc)
+    else:
+        raise AssertionError("open_app without web_app must fail closed")
 
 
 def test_invite_qr_accepts_startapp_invite_and_referral_targets() -> None:
