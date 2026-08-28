@@ -1,3 +1,4 @@
+import os
 import ssl
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,7 @@ class MaxClient:
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._headers = {"Authorization": token}
-        self._web_app = web_app
+        self._web_app = web_app or os.getenv("MAX_BOT_USERNAME") or None
         self._verify: bool | ssl.SSLContext = True
         if ca_bundle:
             ca_path = Path(ca_bundle).expanduser().resolve()
