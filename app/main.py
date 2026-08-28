@@ -2,6 +2,7 @@ import base64
 import hmac
 import io
 import logging
+import os
 import re
 from typing import Any
 
@@ -132,6 +133,9 @@ async def log_max_identity() -> None:
 async def startup() -> None:
     await ensure_max_subscription()
     await log_max_identity()
+    if os.getenv("RODCOM_FORWARD_SMOKE") == "1":
+        await forward_to_rodcom({"update_type": "timeweb_smoke"})
+        logger.info("RODCOM forward smoke passed")
 
 
 @app.get("/health")
