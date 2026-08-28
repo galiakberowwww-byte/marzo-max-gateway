@@ -1,6 +1,7 @@
 services:
   - type: web
-    name: marzo-max-gateway
+    # Must be a new Render service. Never point this Blueprint at RODCOM.
+    name: marzo-max-gateway-v2
     runtime: docker
     plan: free
     healthCheckPath: /health
@@ -12,3 +13,11 @@ services:
         sync: false
       - key: MAX_CA_BUNDLE
         value: /app/certs/max-russian-trusted-ca.pem
+      - key: MARZO_DATABASE_PATH
+        value: /app/data/marzo.sqlite3
+      - key: MARZO_ADMIN_TOKEN
+        sync: false
+      - key: INTERIOR_PROJECT_API_URL
+        sync: false
+      - key: INTERIOR_PROJECT_API_TOKEN
+        sync: false

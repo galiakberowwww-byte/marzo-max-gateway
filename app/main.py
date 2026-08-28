@@ -2,13 +2,12 @@ import hmac
 import logging
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import parse_qs, urlparse
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
+from pydantic import BaseModel, Field
 
+from app.leads import LeadDraft, LeadStore, QUESTIONS
 from app.max_client import MaxClient
-from app.contact_verification import is_verified_max_contact, phone_from_vcf
-from app.rodcom_client import RodcomClient
 from app.settings import get_settings
 
 logging.basicConfig(level=logging.INFO)
@@ -19,13 +18,18 @@ app = FastAPI(title="MARZO MAX Gateway", version="0.1.0")
 
 @dataclass
 class Dialog:
-    state: str = "new"
-    parent_id: str | None = None
-    community_id: str | None = None
-    invitation_token: str | None = None
+    draft: LeadDraft
 
 
 dialogs: dict[str, Dialog] = {}
+
+
+class ManualLead(BaseModel):
+    phone: str = Field(min_length=5, max_length=32)
+    direction: str
+    source: str = "manager"
+    customer_name: str | None = None
+    brief: dict[str, str] = Field(default_factory=dict)
 
 
 def _as_int(value: Any) -> int | None:
@@ -80,103 +84,69 @@ async def process_update(update: dict[str, Any]) -> None:
     max_user_id = str(sender.get("user_id") or update.get("user_id") or "")
     if not max_user_id:
         return
-    dialog = dialogs.setdefault(max_user_id, Dialog())
-    rodcom = (
-        RodcomClient(settings.rodcom_api_base_url, settings.rodcom_gateway_token)
-        if settings.rodcom_api_base_url and settings.rodcom_gateway_token else None
-    )
+    dialog = dialogs.get(max_user_id)
 
     async def send(text: str) -> None:
         await client.send_text(text, **{target_name: target_id})
 
-    async def ask_contact(text: str) -> None:
-        await client.send_keyboard(
-            text, [{"type": "request_contact", "text": "Подтвердить номер"}], **{target_name: target_id}
-        )
-
     async def menu(text: str) -> None:
         await client.send_keyboard(text, [
-            {"type": "message", "text": "Создать комьюнити"},
-            {"type": "message", "text": "Войти по приглашению"},
-            {"type": "message", "text": "Добавить ребёнка"},
-            {"type": "message", "text": "Заявки на вступление"},
+            {"type": "message", "text": "Плитка / керамогранит"},
+            {"type": "message", "text": "Дизайн"},
+            {"type": "message", "text": "Ремонт / отделка"},
+            {"type": "message", "text": "Комплектация / под ключ"},
         ], **{target_name: target_id})
 
     if update_type == "bot_started":
         payload = update.get("payload")
-        dialog.invitation_token = payload[2:] if isinstance(payload, str) and payload.startswith("i_") else None
-        dialog.state = "awaiting_contact"
-        await ask_contact("Здравствуйте! Чтобы зарегистрироваться в RODCOM, подтвердите номер телефона из MAX.")
+        source = payload[7:80] if isinstance(payload, str) and payload.startswith("source=") else "max_direct"
+        dialogs[max_user_id] = Dialog(LeadDraft(max_user_id=max_user_id, source=source))
+        await menu("Здравствуйте! MARZO поможет с плиткой, дизайном и ремонтом. С чего начнём?")
         return
     if update_type != "message_created":
         return
 
     body = message.get("body") or {}
     text = (body.get("text") or "").strip()
-    contact = next(
-        (item.get("payload") or {} for item in (message.get("attachments") or []) if item.get("type") == "contact"), None
-    )
-    if contact:
-        vcf_info, contact_hash = contact.get("vcf_info"), contact.get("hash")
-        phone = phone_from_vcf(vcf_info) if isinstance(vcf_info, str) else None
-        if not isinstance(contact_hash, str) or not phone or not is_verified_max_contact(
-            token=settings.max_bot_token, vcf_info=vcf_info, received_hash=contact_hash
-        ):
-            await ask_contact("Не удалось подтвердить номер. Нажмите кнопку «Подтвердить номер».")
-            return
-        if rodcom is None:
-            await send("RODCOM временно недоступен. Попробуйте позже.")
-            return
-        profile = await rodcom.register_parent(
-            max_user_id=max_user_id, phone=phone, display_name=str(sender.get("name") or "Родитель"),
-            event_id=str(update.get("timestamp") or message.get("id") or f"contact:{max_user_id}"),
-        )
-        dialog.parent_id = profile["id"]
-        if dialog.invitation_token:
-            accepted = await rodcom.accept_invitation(actor_user_id=dialog.parent_id, token=dialog.invitation_token)
-            dialog.community_id, dialog.state = accepted["communityId"], "awaiting_child"
-            await send("Вы зарегистрированы. Напишите имя ребёнка, которого хотите добавить в это комьюнити.")
-            return
-        dialog.state = "ready"
-        await menu("Номер подтверждён. Выберите действие.")
+    directions = {"Плитка / керамогранит", "Дизайн", "Ремонт / отделка", "Комплектация / под ключ"}
+    if text in directions:
+        draft = LeadDraft(max_user_id=max_user_id, source=(dialog.draft.source if dialog else "max_direct"), direction=text)
+        dialogs[max_user_id] = Dialog(draft)
+        await send(QUESTIONS[0][1])
         return
-    if not dialog.parent_id:
-        await ask_contact("Сначала подтвердите номер телефона.")
+    if dialog is None or dialog.draft.direction is None:
+        await menu("Выберите направление, чтобы начать короткий бриф.")
         return
-    if text == "Создать комьюнити":
-        dialog.state = "awaiting_community_name"
-        await send("Напишите название комьюнити, например «4А, школа № 12».")
+    if not text:
         return
-    if dialog.state == "awaiting_community_name" and text:
-        if rodcom is None:
-            await send("RODCOM временно недоступен. Попробуйте позже.")
-            return
-        community = await rodcom.create_community(actor_user_id=dialog.parent_id, name=text)
-        invitation = await rodcom.create_invitation(actor_user_id=dialog.parent_id, community_id=community["id"])
-        token = parse_qs(urlparse(invitation["inviteUrl"]).query)["token"][0]
-        dialog.community_id, dialog.state = community["id"], "ready"
-        await send(f"Комьюнити создано. Вы организатор. Отправьте родителям ссылку:\nhttps://max.ru/{settings.max_bot_username}?start=i_{token}")
+    key, _ = QUESTIONS[dialog.draft.question_index]
+    dialog.draft.answers[key] = text[:1000]
+    dialog.draft.question_index += 1
+    if dialog.draft.question_index < len(QUESTIONS):
+        await send(QUESTIONS[dialog.draft.question_index][1])
         return
-    if text == "Добавить ребёнка" and dialog.community_id:
-        dialog.state = "awaiting_child"
-        await send("Напишите имя ребёнка.")
-        return
-    if dialog.state == "awaiting_child" and text:
-        if rodcom is None or not dialog.community_id:
-            await send("Не найдено комьюнити для заявки. Откройте приглашение ещё раз.")
-            return
-        request = await rodcom.create_membership_request(
-            actor_user_id=dialog.parent_id, community_id=dialog.community_id, child_display_name=text
-        )
-        dialog.state = "ready"
-        await send(f"Заявка создана и ждёт решения организатора. Номер заявки: {request['id']}")
-        return
-    await menu("Выберите действие.")
+    lead_id = LeadStore(settings.marzo_database_path).save(dialog.draft, phone=None, customer_name=str(sender.get("name") or ""))
+    dialogs.pop(max_user_id, None)
+    await send(f"Спасибо! Заявка {lead_id} передана менеджеру MARZO. Он уточнит удобный способ связи.")
 
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "service": "marzo-max-gateway"}
+    return {"status": "ok", "service": "marzo-max-gateway", "tenant": "marzo"}
+
+
+@app.get("/miniapp/config")
+async def mini_app_config() -> dict[str, str]:
+    return {"tenant": "marzo", "integration": "interior-project"}
+
+
+@app.post("/internal/leads/manual")
+async def create_manual_lead(payload: ManualLead, x_marzo_admin_token: str | None = Header(default=None)) -> dict[str, str]:
+    settings = get_settings()
+    if not settings.marzo_admin_token or not hmac.compare_digest(x_marzo_admin_token or "", settings.marzo_admin_token):
+        raise HTTPException(status_code=401, detail="Invalid manager token")
+    lead_id = LeadStore(settings.marzo_database_path).add_manual(**payload.model_dump())
+    return {"id": lead_id, "status": "qualified", "interior_project": "pending"}
 
 
 @app.post("/webhooks/max")
