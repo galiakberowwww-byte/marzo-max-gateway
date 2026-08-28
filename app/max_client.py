@@ -15,9 +15,11 @@ class MaxClient:
         token: str,
         base_url: str,
         ca_bundle: str | None = None,
+        web_app: str | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._headers = {"Authorization": token}
+        self._web_app = web_app
         self._verify: bool | ssl.SSLContext = True
         if ca_bundle:
             ca_path = Path(ca_bundle).expanduser().resolve()
@@ -52,13 +54,18 @@ class MaxClient:
 
         return result
 
-    @staticmethod
-    def _keyboard_button(button: dict[str, Any]) -> dict[str, Any]:
+    def _keyboard_button(self, button: dict[str, Any]) -> dict[str, Any]:
         text = str(button.get("text") or "")[:128]
         payload = button.get("payload")
         if isinstance(payload, str) and payload.startswith("__open_app__:"):
+            if not self._web_app:
+                raise MaxApiError("MAX Mini App username is unavailable")
             start_payload = payload.removeprefix("__open_app__:")[:512]
-            result: dict[str, Any] = {"type": "open_app", "text": text}
+            result: dict[str, Any] = {
+                "type": "open_app",
+                "text": text,
+                "web_app": self._web_app,
+            }
             if start_payload:
                 result["payload"] = start_payload
             return result
